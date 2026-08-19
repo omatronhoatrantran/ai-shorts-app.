@@ -20,21 +20,26 @@ def get_script_from_ai(api_key: str, topic: str, target_seconds: int):
     }}
     """
     
-    # Tự động thử các model Gemini tương thích
-    models_to_try = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
-    last_err = None
-    
-    for m_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(m_name)
-            res = model.generate_content(prompt)
-            clean_json = res.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_json)["script_text"]
-        except Exception as e:
-            last_err = e
-            continue
-            
-    raise RuntimeError(f"Không thể kết nối mô hình Gemini: {last_err}")
+    # Tự động tìm mô hình có hỗ trợ generateContent từ tài khoản của bạn
+    chosen_model_name = None
+    try:
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                if "flash" in m.name:
+                    chosen_model_name = m.name
+                    break
+                elif chosen_model_name is None:
+                    chosen_model_name = m.name
+    except Exception:
+        chosen_model_name = "models/gemini-1.5-flash-latest"
+
+    if not chosen_model_name:
+        chosen_model_name = "models/gemini-1.5-flash-latest"
+
+    model = genai.GenerativeModel(chosen_model_name)
+    res = model.generate_content(prompt)
+    clean_json = res.text.replace("```json", "").replace("```", "").strip()
+    return json.loads(clean_json)["script_text"]
 
 def generate_voice(text: str, output_path="temp/voice.mp3"):
     os.makedirs("temp", exist_ok=True)
