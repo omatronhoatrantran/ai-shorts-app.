@@ -20,40 +20,8 @@ def get_script_from_ai(api_key: str, topic: str, target_seconds: int):
     }}
     """
     
-    # Ưu tiên các model thế hệ mới nhất
-    models_to_try = [
-        "gemini-3.6-flash",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest"
-    ]
-    
-    res = None
-    for m_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(m_name)
-            res = model.generate_content(prompt)
-            if res and res.text:
-                break
-        except Exception:
-            continue
-
-    if not res:
-        # Tự động quét tìm mô hình khả dụng bất kỳ từ tài khoản
-        for m in genai.list_models():
-            if "generateContent" in m.supported_generation_methods:
-                try:
-                    model = genai.GenerativeModel(m.name)
-                    res = model.generate_content(prompt)
-                    if res and res.text:
-                        break
-                except Exception:
-                    continue
-
-    if not res or not res.text:
-        raise RuntimeError("Không thể kết nối mô hình Gemini phù hợp.")
-
+    model = genai.GenerativeModel("gemini-3.6-flash")
+    res = model.generate_content(prompt)
     clean_json = res.text.replace("```json", "").replace("```", "").strip()
     return json.loads(clean_json)["script_text"]
 
@@ -147,3 +115,4 @@ def process_video_pipeline(api_key, mode, topic, custom_script, target_duration,
     
     output_video = render_ffmpeg(bg_image, audio_path, ass_path)
     return output_video
+ 
