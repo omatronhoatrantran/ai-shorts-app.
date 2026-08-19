@@ -41,7 +41,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: KaraokeHighlight,Arial,85,&H00FFFFFF,&H00EB67F2,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,14,0,2,20,20,380,1
+Style: KaraokeHighlight,sans-serif,80,&H00FFFFFF,&H00EB67F2,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,12,0,2,30,30,400,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -65,36 +65,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         f.write(header + "\n".join(events))
     return output_ass
 
-def render_ffmpeg(bg_path, audio_path, ass_path, banner_text, logo_path, output_path="temp/final_short.mp4"):
+def render_ffmpeg(bg_path, audio_path, ass_path, banner_text, output_path="temp/final_short.mp4"):
     ass_path_clean = ass_path.replace("\\", "/").replace(":", "\\:")
+    clean_banner = banner_text.replace(":", " - ").replace("'", "").replace('"', '')
     
-    if os.path.exists(logo_path):
-        filter_str = (
-            "[0:v]scale=8000:-1,zoompan=z='min(zoom+0.0015,1.25)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=30[bg];"
-            "[2:v]scale=150:-1[logo];"
-            "[bg][logo]overlay=40:60[v_logo];"
-            f"[v_logo]drawtext=text='{banner_text}':fontcolor=white:fontsize=48:"
-            f"box=1:boxcolor=black@0.65:boxborderw=18:x=(w-text_w)/2:y=240[v_banner];"
-            f"[v_banner]ass='{ass_path_clean}'[v_final]"
-        )
-        input_args = ["-loop", "1", "-i", bg_path, "-i", audio_path, "-i", logo_path]
-    else:
-        filter_str = (
-            "[0:v]scale=8000:-1,zoompan=z='min(zoom+0.0015,1.25)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=30[bg];"
-            f"[bg]drawtext=text='{banner_text}':fontcolor=white:fontsize=48:"
-            f"box=1:boxcolor=black@0.65:boxborderw=18:x=(w-text_w)/2:y=240[v_banner];"
-            f"[v_banner]ass='{ass_path_clean}'[v_final]"
-        )
-        input_args = ["-loop", "1", "-i", bg_path, "-i", audio_path]
+    filter_str = (
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+        "zoompan=z='min(zoom+0.0012,1.25)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:s=1080x1920:fps=30[bg];"
+        f"[bg]drawtext=text='{clean_banner}':fontcolor=white:fontsize=46:"
+        f"box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=220[v_banner];"
+        f"[v_banner]ass='{ass_path_clean}'[v_final]"
+    )
 
     cmd = [
         "ffmpeg", "-y",
-        *input_args,
+        "-loop", "1", "-i", bg_path,
+        "-i", audio_path,
         "-filter_complex", filter_str,
         "-map", "[v_final]",
         "-map", "1:a",
         "-c:v", "libx264",
-        "-preset", "veryfast",
+        "-preset", "ultrafast",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-shortest",
@@ -117,9 +108,8 @@ def process_video_pipeline(api_key, mode, topic, custom_script, target_duration,
     status_tracker.write("✨ Đang trích xuất timestamp và tạo hiệu ứng phụ đề nảy chữ...")
     ass_path = generate_ass_subtitles(audio_path)
     
-    status_tracker.write("🎞️ Đang render video: Ghép Zoom, Banner và hiệu ứng...")
+    status_tracker.write("🎞️ Đang render video tốc độ cao...")
     bg_image = "bg.jpg"
-    logo_image = "logo.png"
     
-    output_video = render_ffmpeg(bg_image, audio_path, ass_path, banner_title, logo_image)
+    output_video = render_ffmpeg(bg_image, audio_path, ass_path, banner_title)
     return output_video
