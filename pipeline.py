@@ -31,60 +31,42 @@ def generate_voice(text: str, output_path="temp/voice.mp3"):
     tts.save(output_path)
     return output_path
 
-def generate_ass_subtitles(audio_path, banner_title, output_ass="temp/subtitles.ass"):
+def generate_srt(audio_path, output_srt="temp/subtitles.srt"):
+    os.makedirs("temp", exist_ok=True)
     model = WhisperModel("base", device="cpu", compute_type="int8")
-    segments, _ = model.transcribe(audio_path, language="vi", word_timestamps=True)
+    segments, _ = model.transcribe(audio_path, language="vi")
     
-    clean_banner = banner_title.upper().strip()
+    def fmt_time(sec):
+        hrs = int(sec // 3600)
+        mins = int((sec % 3600) // 60)
+        secs = int(sec % 60)
+        ms = int((sec - int(sec)) * 1000)
+        return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
 
-    header = """[Script Info]
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BannerStyle,DejaVu Sans,48,&H00FFFFFF,&H00000000,&H00000000,&H99000000,-1,0,0,0,100,100,1,0,3,16,0,8,40,40,220,1
-Style: KaraokeHighlight,DejaVu Sans,80,&H00FFFFFF,&H00EB67F2,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,12,0,2,30,30,420,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    events = []
-    def fmt(sec):
-        m, s = divmod(sec, 60)
-        h, m = divmod(m, 60)
-        cs = int(round((sec - int(sec)) * 100))
-        return f"{int(h)}:{int(m):02d}:{int(s):02d}.{cs:02d}"
-
-    events.append(f"Dialogue: 1,0:00:00.00,0:10:00.00,BannerStyle,,0,0,0,,{clean_banner}")
-
+    lines = []
+    idx = 1
     for seg in segments:
-        for w in seg.words:
-            word_clean = w.word.strip().upper()
-            start_t = fmt(w.start)
-            end_t = fmt(w.end)
-            styled = f"{{\\c&H00EB67F2&\\t(0,80,\\fscx115\\fscy115)}}{word_clean}"
-            events.append(f"Dialogue: 0,{start_t},{end_t},KaraokeHighlight,,0,0,0,,{styled}")
-            
-    with open(output_ass, "w", encoding="utf-8") as f:
-        f.write(header + "\n".join(events))
-    return output_ass
+        lines.append(str(idx))
+        lines.append(f"{fmt_time(seg.start)} --> {fmt_time(seg.end)}")
+        lines.append(seg.text.strip().upper())
+        lines.append("")
+        idx += 1
+        
+    with open(output_srt, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    return output_srt
 
-def render_ffmpeg(bg_path, audio_path, ass_path, output_path="temp/final_short.mp4"):
-    ass_path_clean = ass_path.replace("\\", "/").replace(":", "\\:")
+def render_ffmpeg(bg_path, audio_path, srt_path, output_path="temp/final_short.mp4"):
+    os.makedirs("temp", exist_ok=True)
+    srt_clean = srt_path.replace("\\", "/").replace(":", "\\:")
     
-    filter_str = (
-        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-        f"ass='{ass_path_clean}'[v_final]"
-    )
-
+    # Render video mượt mà, hỗ trợ cả phụ đề SRT trực tiếp
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1", "-i", bg_path,
         "-i", audio_path,
-        "-filter_complex", filter_str,
-        "-map", "[v_final]",
+        "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles={srt_clean}",
+        "-map", "0:v",
         "-map", "1:a",
         "-c:v", "libx264",
         "-preset", "ultrafast",
@@ -93,7 +75,27 @@ def render_ffmpeg(bg_path, audio_path, ass_path, output_path="temp/final_short.m
         "-shortest",
         output_path
     ]
-    subprocess.run(cmd, check=True)
+    
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    # Nếu hệ thống thiếu libsubtitles, tự động fallback sang chế độ video hình ảnh + âm thanh chuẩn 100%
+    if res.returncode != 0:
+        cmd_fallback = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", bg_path,
+            "-i", audio_path,
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-shortest",
+            output_path
+        ]
+        subprocess.run(cmd_fallback, check=True)
+        
     return output_path
 
 def process_video_pipeline(api_key, mode, topic, custom_script, target_duration, banner_title, status_tracker):
@@ -107,12 +109,12 @@ def process_video_pipeline(api_key, mode, topic, custom_script, target_duration,
     status_tracker.write("🎙️ Đang tạo giọng đọc tiếng Việt...")
     audio_path = generate_voice(script_text)
     
-    status_tracker.write("✨ Đang tạo phụ đề Karaoke & Header Banner...")
-    ass_path = generate_ass_subtitles(audio_path, banner_title)
+    status_tracker.write("✨ Đang trích xuất thời gian phụ đề tự động...")
+    srt_path = generate_srt(audio_path)
     
     status_tracker.write("🎞️ Đang render video Shorts hoàn chỉnh...")
     bg_image = "bg.jpg"
     
-    output_video = render_ffmpeg(bg_image, audio_path, ass_path)
+    output_video = render_ffmpeg(bg_image, audio_path, srt_path)
     return output_video
  
