@@ -1,9 +1,10 @@
 import os
+import glob
 import json
 import subprocess
+from PIL import Image, ImageDraw
 import google.generativeai as genai
 from gtts import gTTS
-from faster_whisper import WhisperModel
 
 def get_script_from_ai(api_key: str, topic: str, target_seconds: int):
     genai.configure(api_key=api_key)
@@ -31,71 +32,47 @@ def generate_voice(text: str, output_path="temp/voice.mp3"):
     tts.save(output_path)
     return output_path
 
-def generate_srt(audio_path, output_srt="temp/subtitles.srt"):
-    os.makedirs("temp", exist_ok=True)
-    model = WhisperModel("base", device="cpu", compute_type="int8")
-    segments, _ = model.transcribe(audio_path, language="vi")
+def get_or_create_bg():
+    # 1. Tìm file bg.jpg hoặc bất kỳ file ảnh jpg/png nào có sẵn trong thư mục
+    if os.path.exists("bg.jpg"):
+        return "bg.jpg"
     
-    def fmt_time(sec):
-        hrs = int(sec // 3600)
-        mins = int((sec % 3600) // 60)
-        secs = int(sec % 60)
-        ms = int((sec - int(sec)) * 1000)
-        return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
-
-    lines = []
-    idx = 1
-    for seg in segments:
-        lines.append(str(idx))
-        lines.append(f"{fmt_time(seg.start)} --> {fmt_time(seg.end)}")
-        lines.append(seg.text.strip().upper())
-        lines.append("")
-        idx += 1
+    images = glob.glob("*.jpg") + glob.glob("*.png") + glob.glob("*.jpeg")
+    if images:
+        return images[0]
         
-    with open(output_srt, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    return output_srt
+    # 2. Nếu chưa có ảnh nào, tự tạo ảnh nền Gradient 1080x1920
+    bg_path = "temp/default_bg.jpg"
+    img = Image.new("RGB", (1080, 1920), color=(15, 23, 42))
+    draw = ImageDraw.Draw(img)
+    for y in range(1920):
+        r = int(15 + (45 - 15) * (y / 1920))
+        g = int(23 + (55 - 23) * (y / 1920))
+        b = int(42 + (90 - 42) * (y / 1920))
+        draw.line([(0, y), (1080, y)], fill=(r, g, b))
+    img.save(bg_path)
+    return bg_path
 
-def render_ffmpeg(bg_path, audio_path, srt_path, output_path="temp/final_short.mp4"):
+def render_ffmpeg(bg_path, audio_path, output_path="temp/final_short.mp4"):
     os.makedirs("temp", exist_ok=True)
-    srt_clean = srt_path.replace("\\", "/").replace(":", "\\:")
     
-    # Render video mượt mà, hỗ trợ cả phụ đề SRT trực tiếp
     cmd = [
         "ffmpeg", "-y",
-        "-loop", "1", "-i", bg_path,
+        "-loop", "1",
+        "-framerate", "30",
+        "-i", bg_path,
         "-i", audio_path,
-        "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles={srt_clean}",
-        "-map", "0:v",
-        "-map", "1:a",
+        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
         "-c:v", "libx264",
+        "-tune", "stillimage",
         "-preset", "ultrafast",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
+        "-b:a", "192k",
         "-shortest",
         output_path
     ]
-    
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    
-    # Nếu hệ thống thiếu libsubtitles, tự động fallback sang chế độ video hình ảnh + âm thanh chuẩn 100%
-    if res.returncode != 0:
-        cmd_fallback = [
-            "ffmpeg", "-y",
-            "-loop", "1", "-i", bg_path,
-            "-i", audio_path,
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
-            "-map", "0:v",
-            "-map", "1:a",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-shortest",
-            output_path
-        ]
-        subprocess.run(cmd_fallback, check=True)
-        
+    subprocess.run(cmd, check=True)
     return output_path
 
 def process_video_pipeline(api_key, mode, topic, custom_script, target_duration, banner_title, status_tracker):
@@ -109,12 +86,10 @@ def process_video_pipeline(api_key, mode, topic, custom_script, target_duration,
     status_tracker.write("🎙️ Đang tạo giọng đọc tiếng Việt...")
     audio_path = generate_voice(script_text)
     
-    status_tracker.write("✨ Đang trích xuất thời gian phụ đề tự động...")
-    srt_path = generate_srt(audio_path)
+    status_tracker.write("🖼️ Đang chuẩn bị hình ảnh nền...")
+    bg_image = get_or_create_bg()
     
     status_tracker.write("🎞️ Đang render video Shorts hoàn chỉnh...")
-    bg_image = "bg.jpg"
-    
-    output_video = render_ffmpeg(bg_image, audio_path, srt_path)
+    output_video = render_ffmpeg(bg_image, audio_path)
     return output_video
  
