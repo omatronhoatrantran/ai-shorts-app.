@@ -1,0 +1,6 @@
+streamlit
+google-generativeai
+faster-whisper
+gTTS
+requests
+pillow
