@@ -20,24 +20,40 @@ def get_script_from_ai(api_key: str, topic: str, target_seconds: int):
     }}
     """
     
-    # Tự động tìm mô hình có hỗ trợ generateContent từ tài khoản của bạn
-    chosen_model_name = None
-    try:
+    # Ưu tiên các model thế hệ mới nhất
+    models_to_try = [
+        "gemini-3.6-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest"
+    ]
+    
+    res = None
+    for m_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(m_name)
+            res = model.generate_content(prompt)
+            if res and res.text:
+                break
+        except Exception:
+            continue
+
+    if not res:
+        # Tự động quét tìm mô hình khả dụng bất kỳ từ tài khoản
         for m in genai.list_models():
             if "generateContent" in m.supported_generation_methods:
-                if "flash" in m.name:
-                    chosen_model_name = m.name
-                    break
-                elif chosen_model_name is None:
-                    chosen_model_name = m.name
-    except Exception:
-        chosen_model_name = "models/gemini-1.5-flash-latest"
+                try:
+                    model = genai.GenerativeModel(m.name)
+                    res = model.generate_content(prompt)
+                    if res and res.text:
+                        break
+                except Exception:
+                    continue
 
-    if not chosen_model_name:
-        chosen_model_name = "models/gemini-1.5-flash-latest"
+    if not res or not res.text:
+        raise RuntimeError("Không thể kết nối mô hình Gemini phù hợp.")
 
-    model = genai.GenerativeModel(chosen_model_name)
-    res = model.generate_content(prompt)
     clean_json = res.text.replace("```json", "").replace("```", "").strip()
     return json.loads(clean_json)["script_text"]
 
