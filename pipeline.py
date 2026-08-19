@@ -1,5 +1,4 @@
 import os
-    import os
 import json
 import subprocess
 import google.generativeai as genai
@@ -20,10 +19,22 @@ def get_script_from_ai(api_key: str, topic: str, target_seconds: int):
       "script_text": "Toàn bộ đoạn văn bản kịch bản tiếng Việt viết liền mạch..."
     }}
     """
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    res = model.generate_content(prompt)
-    clean_json = res.text.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean_json)["script_text"]
+    
+    # Tự động thử các model Gemini tương thích
+    models_to_try = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+    last_err = None
+    
+    for m_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(m_name)
+            res = model.generate_content(prompt)
+            clean_json = res.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean_json)["script_text"]
+        except Exception as e:
+            last_err = e
+            continue
+            
+    raise RuntimeError(f"Không thể kết nối mô hình Gemini: {last_err}")
 
 def generate_voice(text: str, output_path="temp/voice.mp3"):
     os.makedirs("temp", exist_ok=True)
@@ -97,7 +108,7 @@ def render_ffmpeg(bg_path, audio_path, ass_path, output_path="temp/final_short.m
     return output_path
 
 def process_video_pipeline(api_key, mode, topic, custom_script, target_duration, banner_title, status_tracker):
-    if "AI tự sinh" in mode:
+    if "AI tự động viết" in mode or "AI tự sinh" in mode:
         status_tracker.write("📝 Đang dùng Gemini AI tạo kịch bản chuẩn thời lượng...")
         script_text = get_script_from_ai(api_key, topic, target_duration)
     else:
